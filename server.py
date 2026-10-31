@@ -8,33 +8,36 @@ socketio = SocketIO(app, cors_allowed_origins="*", async_mode='eventlet')
 
 games = {}
 
-@app.route('/')
-def index():
-    return "Chess Server is running!"
-
 @socketio.on('join')
 def on_join(data):
     room = data['room']
+    user_name = data.get('name', 'Соперник')
     join_room(room)
+    
     if room not in games:
-        games[room] = {'board': chess.Board(), 'players': []}
+        games[room] = {'board': chess.Board(), 'players': {}}
     
-    games[room]['players'].append(request.sid)
-    print(f"Player {request.sid} joined room {room}")
+    games[room]['players'][request.sid] = user_name
     
+    # Отправляем список игроков в комнату
+    emit('players_update', {'players': list(games[room]['players'].values())}, room=room)
+    # Отправляем текущую позицию доски
     emit('board_state', {'fen': games[room]['board'].fen()}, room=room)
 
 @socketio.on('move')
 def on_move(data):
     room = data['room']
-    move = data['move']
+    move_data = data['move']
     
     if room not in games:
         return
     
     board = games[room]['board']
     try:
-        chess_move = chess.Move.from_uci(f"{move['from']}{move['to']}")
+        # Поддержка превращения пешки (по умолчанию в ферзя)
+        promo = move_data.get('promotion', 'q')
+        chess_move = chess.Move.from_uci(f"{move_data['from']}{move_data['to']}{promo}")
+        
         if chess_move in board.legal_moves:
             board.push(chess_move)
             emit('board_state', {'fen': board.fen()}, room=room)
@@ -51,7 +54,10 @@ def on_move(data):
 
 @socketio.on('disconnect')
 def on_disconnect():
-    print(f"Player {request.sid} disconnected")
-
-if __name__ == '__main__':
-    socketio.run(app, host='0.0.0.0', port=10000)
+    # Если игрок выходит, убираем его из комнаты
+    for room, game_data in list(games.items()):
+        if request.sid in game_data['players']:
+            del game_data['players'][request.sid]
+            emit('players_update', {'players': list(game_data['players'].values())}, room=room)
+            if len(game_data['players']) == 0:
+                del games[room]
