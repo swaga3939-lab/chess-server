@@ -103,8 +103,11 @@ def on_move(data):
             chess_move = chess.Move.from_uci(f"{from_sq}{to_sq}")
             
         if chess_move in board.legal_moves:
+            # ВОТ ТУТ МАГИЯ: получаем красивую нотацию (f4, Nf3) ДО хода
+            move_san = board.san(chess_move) 
+            
             board.push(chess_move)
-            game['history'].append(chess_move.uci())
+            game['history'].append(move_san) # Сохраняем красивую нотацию
             game['turn_start_time'] = time.time() # Сброс таймера для следующего
             
             # Проверка на конец игры
