@@ -1,18 +1,19 @@
 from flask import Flask, request
 from flask_socketio import SocketIO, join_room, emit
+from flask_cors import CORS
 import chess
 import time
 import json
 import os
 
 app = Flask(__name__)
+CORS(app) # Разрешаем запросы с GitHub Pages
 app.config['SECRET_KEY'] = 'secret!'
 socketio = SocketIO(app, cors_allowed_origins="*", async_mode='eventlet')
 
 games = {}
 HISTORY_FILE = "history.json"
 
-# Загружаем историю при старте
 if os.path.exists(HISTORY_FILE):
     try:
         with open(HISTORY_FILE, "r") as f:
@@ -33,7 +34,6 @@ if os.path.exists(HISTORY_FILE):
 def save_history():
     safe_games = {}
     for r_id, g in games.items():
-        # Сохраняем только завершенные игры в архив
         if g['status'] == 'finished':
             safe_games[r_id] = {
                 'fen': g['board'].fen(),
@@ -52,11 +52,8 @@ def save_history():
 def get_game(room_id):
     if room_id in games:
         g = games[room_id]
-        
-        # ПРОВЕРКА: Смотреть можно только завершенные партии
         if g['status'] != 'finished':
             return {"error": "Партия еще не завершена"}, 400
-            
         return {
             'history': g['history'],
             'players': g['players'],
