@@ -15,15 +15,22 @@ def on_connect():
 @socketio.on('join')
 def on_join(data):
     room = data['room']
-    user_id = data.get('user_id', str(request.sid)) # Используем Telegram ID
     user_name = data.get('name', 'Игрок')
+    user_id = data.get('user_id', str(request.sid)) 
+    user_photo = data.get('photo_url', '') # Получаем ссылку на аву
+    
     join_room(room)
     
     if room not in games:
         games[room] = {'board': chess.Board(), 'players': {}}
     
-    # Сохраняем игрока по его Telegram ID
-    games[room]['players'][user_id] = user_name
+    # Сохраняем и имя, и аватарку, и SID
+    games[room]['players'][user_id] = {
+        'name': user_name, 
+        'photo': user_photo,
+        'sid': request.sid
+    }
+    
     print(f"ВОШЕЛ В КОМНАТУ {room}: {user_name} (ID: {user_id})")
     
     emit('players_update', games[room]['players'], room=room)
@@ -64,6 +71,4 @@ def on_move(data):
 
 @socketio.on('disconnect')
 def on_disconnect():
-    # МЫ БОЛЬШЕ НЕ УДАЛЯЕМ ИГРОКА ЗДЕСЬ!
-    # Просто выводим лог, чтобы комната жила, пока игрок спит в фоне.
-    print(f"ОТКЛЮЧЕН (свернул приложение): {request.sid}")
+    print(f"ОТКЛЮЧЕН: {request.sid}")
