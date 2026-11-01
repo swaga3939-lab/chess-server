@@ -8,6 +8,10 @@ socketio = SocketIO(app, cors_allowed_origins="*", async_mode='eventlet')
 
 games = {}
 
+@socketio.on('connect')
+def on_connect():
+    print(f"ПОДКЛЮЧЕН: {request.sid}")
+
 @socketio.on('join')
 def on_join(data):
     room = data['room']
@@ -17,10 +21,10 @@ def on_join(data):
     if room not in games:
         games[room] = {'board': chess.Board(), 'players': {}}
     
-    # Сохраняем игрока по его уникальному SID
     games[room]['players'][request.sid] = user_name
     
-    # Отправляем всем в комнате словарь: { "sid_игрока": "Имя" }
+    print(f"ВОШЕЛ В КОМНАТУ {room}: {user_name} ({request.sid})")
+    
     emit('players_update', games[room]['players'], room=room)
     emit('board_state', {'fen': games[room]['board'].fen()}, room=room)
 
@@ -28,6 +32,7 @@ def on_join(data):
 def on_move(data):
     room = data['room']
     move_data = data['move']
+    print(f"ПОЛУЧЕН ХОД В {room}: {move_data}")
     
     if room not in games:
         return
@@ -37,7 +42,6 @@ def on_move(data):
         from_sq = move_data['from']
         to_sq = move_data['to']
         
-        # Если пешка доходит до конца, превращаем в ферзя автоматически
         if (to_sq[1] == '8' or to_sq[1] == '1'):
             chess_move = chess.Move.from_uci(f"{from_sq}{to_sq}q")
         else:
@@ -55,10 +59,12 @@ def on_move(data):
         else:
             emit('invalid_move', {'msg': 'Нелегальный ход'}, to=request.sid)
     except Exception as e:
-        emit('invalid_move', {'msg': 'Ошибка сервера: неверный формат хода'}, to=request.sid)
+        print(f"ОШИБКА: {e}")
+        emit('invalid_move', {'msg': 'Ошибка сервера'}, to=request.sid)
 
 @socketio.on('disconnect')
 def on_disconnect():
+    print(f"ОТКЛЮЧЕН: {request.sid}")
     for room, game_data in list(games.items()):
         if request.sid in game_data['players']:
             del game_data['players'][request.sid]
