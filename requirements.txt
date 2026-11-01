@@ -3,3 +3,4 @@ Flask-SocketIO==5.3.6
 python-chess==1.999
 eventlet==0.40.1
 gunicorn==22.0.0
+Flask-Cors==4.0.0
