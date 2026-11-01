@@ -12,17 +12,58 @@ socketio = SocketIO(app, cors_allowed_origins="*", async_mode='eventlet')
 games = {}
 HISTORY_FILE = "history.json"
 
+# Загружаем историю при старте
+if os.path.exists(HISTORY_FILE):
+    try:
+        with open(HISTORY_FILE, "r") as f:
+            saved_games = json.load(f)
+            for room_id, g_data in saved_games.items():
+                board = chess.Board(g_data.get('fen', chess.STARTING_FEN))
+                games[room_id] = {
+                    'board': board,
+                    'players': g_data.get('players', {}),
+                    'history': g_data.get('history', []),
+                    'status': 'finished',
+                    'time_left': {'w': 0, 'b': 0},
+                    'time_control': g_data.get('time_control', 600)
+                }
+    except Exception as e:
+        print("Ошибка загрузки истории:", e)
+
 def save_history():
+    safe_games = {}
+    for r_id, g in games.items():
+        # Сохраняем только завершенные игры в архив
+        if g['status'] == 'finished':
+            safe_games[r_id] = {
+                'fen': g['board'].fen(),
+                'history': g['history'],
+                'players': {uid: {'name': p['name'], 'photo': p.get('photo', '')} for uid, p in g['players'].items()},
+                'status': g['status'],
+                'time_control': g['time_control']
+            }
     try:
         with open(HISTORY_FILE, "w") as f:
-            json.dump(games, f)
+            json.dump(safe_games, f)
     except Exception as e:
-        print("Ошибка сохранения истории:", e)
+        print("Ошибка сохранения:", e)
 
 @app.route('/get_game/<room_id>')
 def get_game(room_id):
     if room_id in games:
-        return games[room_id]
+        g = games[room_id]
+        
+        # ПРОВЕРКА: Смотреть можно только завершенные партии
+        if g['status'] != 'finished':
+            return {"error": "Партия еще не завершена"}, 400
+            
+        return {
+            'history': g['history'],
+            'players': g['players'],
+            'status': g['status'],
+            'fen': g['board'].fen(),
+            'time_control': g['time_control']
+        }
     return {"error": "Game not found"}, 404
 
 @socketio.on('join')
@@ -31,13 +72,11 @@ def on_join(data):
     user_name = data.get('name', 'Игрок')
     user_id = data.get('user_id', str(request.sid)) 
     user_photo = data.get('photo_url', '')
-    time_control = data.get('time_control', 600) # По умолчанию 10 минут
-    action = data.get('action', 'join') # create или join
+    time_control = data.get('time_control', 600)
     
     join_room(room)
     
     if room not in games:
-        # Создаем новую игру
         games[room] = {
             'board': chess.Board(),
             'players': {},
@@ -45,24 +84,15 @@ def on_join(data):
             'time_left': {'w': time_control, 'b': time_control},
             'turn_start_time': time.time(),
             'history': [],
-            'status': 'waiting' # waiting, playing, finished
+            'status': 'waiting'
         }
     else:
-        # Если игра уже идет (присоединение)
         if games[room]['status'] == 'waiting':
             games[room]['status'] = 'playing'
             games[room]['turn_start_time'] = time.time()
     
-    # Добавляем игрока
-    games[room]['players'][user_id] = {
-        'name': user_name, 
-        'photo': user_photo,
-        'sid': request.sid
-    }
+    games[room]['players'][user_id] = {'name': user_name, 'photo': user_photo, 'sid': request.sid}
     
-    print(f"Игрок {user_name} зашел в комнату {room}. Режим: {time_control} сек.")
-    
-    # Отправляем данные всем в комнате
     emit('players_update', games[room]['players'], room=room)
     emit('game_state', {
         'fen': games[room]['board'].fen(),
@@ -76,41 +106,33 @@ def on_join(data):
 def on_move(data):
     room = data['room']
     move_data = data['move']
-    
     if room not in games or games[room]['status'] != 'playing': return
     
     game = games[room]
     board = game['board']
     
-    # Считаем время
     now = time.time()
     elapsed = now - game['turn_start_time']
     current_turn = 'w' if board.turn == chess.WHITE else 'b'
     
-    # Вычитаем время
     game['time_left'][current_turn] -= elapsed
-    if game['time_left'][current_turn] < 0:
-        game['time_left'][current_turn] = 0
+    if game['time_left'][current_turn] < 0: game['time_left'][current_turn] = 0
         
     try:
-        from_sq = move_data['from']
-        to_sq = move_data['to']
-        
+        from_sq, to_sq = move_data['from'], move_data['to']
         piece = board.piece_at(chess.parse_square(from_sq))
+        
         if piece and piece.piece_type == chess.PAWN and (to_sq[1] == '8' or to_sq[1] == '1'):
             chess_move = chess.Move.from_uci(f"{from_sq}{to_sq}q")
         else:
             chess_move = chess.Move.from_uci(f"{from_sq}{to_sq}")
             
         if chess_move in board.legal_moves:
-            # ВОТ ТУТ МАГИЯ: получаем красивую нотацию (f4, Nf3) ДО хода
             move_san = board.san(chess_move) 
-            
             board.push(chess_move)
-            game['history'].append(move_san) # Сохраняем красивую нотацию
-            game['turn_start_time'] = time.time() # Сброс таймера для следующего
+            game['history'].append(move_san)
+            game['turn_start_time'] = time.time()
             
-            # Проверка на конец игры
             if board.is_checkmate():
                 game['status'] = 'finished'
                 winner = 'white' if board.turn == chess.BLACK else 'black'
@@ -134,8 +156,7 @@ def on_move(data):
 
 @socketio.on('timeout')
 def on_timeout(data):
-    room = data['room']
-    color = data['color'] # Кто просрочил время
+    room, color = data['room'], data['color']
     if room in games and games[room]['status'] == 'playing':
         games[room]['status'] = 'finished'
         winner = 'black' if color == 'w' else 'white'
