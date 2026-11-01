@@ -15,14 +15,16 @@ def on_connect():
 @socketio.on('join')
 def on_join(data):
     room = data['room']
+    user_id = data.get('user_id', str(request.sid)) # Используем Telegram ID
     user_name = data.get('name', 'Игрок')
     join_room(room)
     
     if room not in games:
         games[room] = {'board': chess.Board(), 'players': {}}
     
-    games[room]['players'][request.sid] = user_name
-    print(f"ВОШЕЛ В КОМНАТУ {room}: {user_name} ({request.sid})")
+    # Сохраняем игрока по его Telegram ID
+    games[room]['players'][user_id] = user_name
+    print(f"ВОШЕЛ В КОМНАТУ {room}: {user_name} (ID: {user_id})")
     
     emit('players_update', games[room]['players'], room=room)
     emit('board_state', {'fen': games[room]['board'].fen()}, room=room)
@@ -31,24 +33,19 @@ def on_join(data):
 def on_move(data):
     room = data['room']
     move_data = data['move']
-    print(f"ПОЛУЧЕН ХОД В {room}: {move_data}")
     
-    if room not in games:
-        return
+    if room not in games: return
     
     board = games[room]['board']
     try:
         from_sq = move_data['from']
         to_sq = move_data['to']
         
-        # Проверяем, какая фигура хочет сделать ход
         piece = board.piece_at(chess.parse_square(from_sq))
         
-        # Если это пешка и она идет на последнюю линию, добавляем превращение в ферзя (q)
         if piece and piece.piece_type == chess.PAWN and (to_sq[1] == '8' or to_sq[1] == '1'):
             chess_move = chess.Move.from_uci(f"{from_sq}{to_sq}q")
         else:
-            # Для рокировки (короля), ладьи и т.д. - без принудительного ферзя!
             chess_move = chess.Move.from_uci(f"{from_sq}{to_sq}")
             
         if chess_move in board.legal_moves:
@@ -63,15 +60,10 @@ def on_move(data):
         else:
             emit('invalid_move', {'msg': 'Нелегальный ход'}, to=request.sid)
     except Exception as e:
-        print(f"ОШИБКА: {e}")
         emit('invalid_move', {'msg': 'Ошибка сервера'}, to=request.sid)
 
 @socketio.on('disconnect')
 def on_disconnect():
-    print(f"ОТКЛЮЧЕН: {request.sid}")
-    for room, game_data in list(games.items()):
-        if request.sid in game_data['players']:
-            del game_data['players'][request.sid]
-            emit('players_update', game_data['players'], room=room)
-            if len(game_data['players']) == 0:
-                del games[room]
+    # МЫ БОЛЬШЕ НЕ УДАЛЯЕМ ИГРОКА ЗДЕСЬ!
+    # Просто выводим лог, чтобы комната жила, пока игрок спит в фоне.
+    print(f"ОТКЛЮЧЕН (свернул приложение): {request.sid}")
