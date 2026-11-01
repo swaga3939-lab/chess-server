@@ -7,7 +7,7 @@ import json
 import os
 
 app = Flask(__name__)
-CORS(app) # Разрешаем запросы с GitHub Pages
+CORS(app)
 app.config['SECRET_KEY'] = 'secret!'
 socketio = SocketIO(app, cors_allowed_origins="*", async_mode='eventlet')
 
@@ -38,7 +38,7 @@ def save_history():
             safe_games[r_id] = {
                 'fen': g['board'].fen(),
                 'history': g['history'],
-                'players': {uid: {'name': p['name'], 'photo': p.get('photo', '')} for uid, p in g['players'].items()},
+                'players': g['players'],
                 'status': g['status'],
                 'time_control': g['time_control']
             }
@@ -47,6 +47,20 @@ def save_history():
             json.dump(safe_games, f)
     except Exception as e:
         print("Ошибка сохранения:", e)
+
+# Информация для окна "Вас приглашают"
+@app.route('/get_game_info/<room_id>')
+def get_game_info(room_id):
+    if room_id in games:
+        g = games[room_id]
+        creator = list(g['players'].values())[0] if g['players'] else None
+        return {
+            "status": g['status'],
+            "time_control": g['time_control'],
+            "creator_name": creator['name'] if creator else "Неизвестно",
+            "creator_photo": creator.get('photo', '') if creator else ""
+        }
+    return {"error": "Game not found"}, 404
 
 @app.route('/get_game/<room_id>')
 def get_game(room_id):
@@ -83,12 +97,14 @@ def on_join(data):
             'history': [],
             'status': 'waiting'
         }
+        color = 'w' # Создатель всегда белый
     else:
+        color = 'b' # Присоединившийся всегда черный
         if games[room]['status'] == 'waiting':
             games[room]['status'] = 'playing'
             games[room]['turn_start_time'] = time.time()
     
-    games[room]['players'][user_id] = {'name': user_name, 'photo': user_photo, 'sid': request.sid}
+    games[room]['players'][user_id] = {'name': user_name, 'photo': user_photo, 'sid': request.sid, 'color': color}
     
     emit('players_update', games[room]['players'], room=room)
     emit('game_state', {
