@@ -22,7 +22,6 @@ def on_join(data):
         games[room] = {'board': chess.Board(), 'players': {}}
     
     games[room]['players'][request.sid] = user_name
-    
     print(f"ВОШЕЛ В КОМНАТУ {room}: {user_name} ({request.sid})")
     
     emit('players_update', games[room]['players'], room=room)
@@ -42,9 +41,14 @@ def on_move(data):
         from_sq = move_data['from']
         to_sq = move_data['to']
         
-        if (to_sq[1] == '8' or to_sq[1] == '1'):
+        # Проверяем, какая фигура хочет сделать ход
+        piece = board.piece_at(chess.parse_square(from_sq))
+        
+        # Если это пешка и она идет на последнюю линию, добавляем превращение в ферзя (q)
+        if piece and piece.piece_type == chess.PAWN and (to_sq[1] == '8' or to_sq[1] == '1'):
             chess_move = chess.Move.from_uci(f"{from_sq}{to_sq}q")
         else:
+            # Для рокировки (короля), ладьи и т.д. - без принудительного ферзя!
             chess_move = chess.Move.from_uci(f"{from_sq}{to_sq}")
             
         if chess_move in board.legal_moves:
